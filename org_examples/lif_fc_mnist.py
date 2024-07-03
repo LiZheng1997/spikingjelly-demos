@@ -4,30 +4,31 @@ import argparse
 import sys
 import datetime
 
+#依赖torch函数库
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data as data
-from torch.cuda import amp
-from torch.utils.tensorboard import SummaryWriter
-import torchvision
+from torch.cuda import amp # 混合精度训练
+from torch.utils.tensorboard import SummaryWriter # Tensorboard的可视化数据写入
+import torchvision # torchvision用来加载数据集
 import numpy as np
-
+# 导入spikingjelly.activation_based的一些依赖项
 from spikingjelly.activation_based import neuron, encoding, functional, surrogate, layer
 
-
+# 定义一个SNN类创建一个SNN网络
 class SNN(nn.Module):
     def __init__(self, tau):
         super().__init__()
 
-        self.layer = nn.Sequential(
+        self.layer = nn.Sequential( # 初始化一个全连接层Linear，调用spikingjell下的neuron的LIF神经元节点创建函数
             layer.Flatten(),
             layer.Linear(28 * 28, 10, bias=False),
             neuron.LIFNode(tau=tau, surrogate_function=surrogate.ATan()),
             )
 
-    def forward(self, x: torch.Tensor):
-        return self.layer(x)
+    def forward(self, x: torch.Tensor):# 定义前向传播的函数
+        return self.layer(x) 
 
 def main():
     '''
@@ -45,35 +46,35 @@ def main():
     .. _lif_fc_mnist.main-en:
 
     The network with FC-LIF structure for classifying MNIST.\n
-    This function initials the network, starts trainingand shows accuracy on test dataset.
+    This function initials the network, starts training and shows accuracy on test dataset.
     '''
     parser = argparse.ArgumentParser(description='LIF MNIST Training')
-    parser.add_argument('-T', default=100, type=int, help='simulating time-steps')
-    parser.add_argument('-device', default='cuda:0', help='device')
-    parser.add_argument('-b', default=64, type=int, help='batch size')
-    parser.add_argument('-epochs', default=100, type=int, metavar='N',
+    parser.add_argument('-T', default=100, type=int, help='simulating time-steps') #仿真时间步长的定义
+    parser.add_argument('-device', default='cuda:0', help='device') # 设备选择
+    parser.add_argument('-b', default=64, type=int, help='batch size') # batch
+    parser.add_argument('-epochs', default=100, type=int, metavar='N', # epochs
                         help='number of total epochs to run')
     parser.add_argument('-j', default=4, type=int, metavar='N',
-                        help='number of data loading workers (default: 4)')
-    parser.add_argument('-data-dir', type=str, help='root dir of MNIST dataset')
-    parser.add_argument('-out-dir', type=str, default='./logs', help='root dir for saving logs and checkpoint')
-    parser.add_argument('-resume', type=str, help='resume from the checkpoint path')
-    parser.add_argument('-amp', action='store_true', help='automatic mixed precision training')
-    parser.add_argument('-opt', type=str, choices=['sgd', 'adam'], default='adam', help='use which optimizer. SGD or Adam')
-    parser.add_argument('-momentum', default=0.9, type=float, help='momentum for SGD')
-    parser.add_argument('-lr', default=1e-3, type=float, help='learning rate')
-    parser.add_argument('-tau', default=2.0, type=float, help='parameter tau of LIF neuron')
+                        help='number of data loading workers (default: 4)') # 数据加载的workers数量
+    parser.add_argument('-data-dir', type=str, help='root dir of MNIST dataset') # 数据集的路径
+    parser.add_argument('-out-dir', type=str, default='./logs', help='root dir for saving logs and checkpoint') # 训练中的日志数据和模型数据路径
+    parser.add_argument('-resume', type=str, help='resume from the checkpoint path') # 恢复训练的模型路径
+    parser.add_argument('-amp', action='store_true', help='automatic mixed precision training') # 自动混合精度训练
+    parser.add_argument('-opt', type=str, choices=['sgd', 'adam'], default='adam', help='use which optimizer. SGD or Adam') # 梯度下降优化器
+    parser.add_argument('-momentum', default=0.9, type=float, help='momentum for SGD') # 是否使用momentum给SGD做梯度的优化
+    parser.add_argument('-lr', default=1e-3, type=float, help='learning rate') # 学习率
+    parser.add_argument('-tau', default=2.0, type=float, help='parameter tau of LIF neuron') # LIF神经元的时间常量
 
     args = parser.parse_args()
     print(args)
 
-    net = SNN(tau=args.tau)
+    net = SNN(tau=args.tau) # 初始化一个SNN的实例
 
     print(net)
 
-    net.to(args.device)
+    net.to(args.device) # 数据流到指定设备
 
-    # 初始化数据加载器
+    # 初始化数据加载器，借用torchvision写好的API
     train_dataset = torchvision.datasets.MNIST(
         root=args.data_dir,
         train=True,
@@ -87,6 +88,7 @@ def main():
         download=True
     )
 
+    # 数据加载器的定义
     train_data_loader = data.DataLoader(
         dataset=train_dataset,
         batch_size=args.b,
@@ -104,14 +106,15 @@ def main():
         pin_memory=True
     )
 
+    # 混合精度的缩放尺度
     scaler = None
     if args.amp:
         scaler = amp.GradScaler()
 
     start_epoch = 0
-    max_test_acc = -1
+    max_test_acc = -1 # 最大测试数据集的准确度
 
-    optimizer = None
+    optimizer = None # 优化器的选择
     if args.opt == 'sgd':
         optimizer = torch.optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum)
     elif args.opt == 'adam':
@@ -119,56 +122,56 @@ def main():
     else:
         raise NotImplementedError(args.opt)
 
-    if args.resume:
+    if args.resume: # 恢复训练的模型加载
         checkpoint = torch.load(args.resume, map_location='cpu')
-        net.load_state_dict(checkpoint['net'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        start_epoch = checkpoint['epoch'] + 1
-        max_test_acc = checkpoint['max_test_acc']
+        net.load_state_dict(checkpoint['net']) # 网络加载
+        optimizer.load_state_dict(checkpoint['optimizer']) # 优化器加载
+        start_epoch = checkpoint['epoch'] + 1 # 回合数
+        max_test_acc = checkpoint['max_test_acc'] # 最大准确度
     
-    out_dir = os.path.join(args.out_dir, f'T{args.T}_b{args.b}_{args.opt}_lr{args.lr}')
+    out_dir = os.path.join(args.out_dir, f'T{args.T}_b{args.b}_{args.opt}_lr{args.lr}') # 输出log路径定义
 
     if args.amp:
-        out_dir += '_amp'
+        out_dir += '_amp' #如果使用了混合精度，标识再输出log文件名上
 
-    if not os.path.exists(out_dir):
+    if not os.path.exists(out_dir): # 判断是会否存在输出log的文件路径，没有的话就创建一个
         os.makedirs(out_dir)
         print(f'Mkdir {out_dir}.')
 
     with open(os.path.join(out_dir, 'args.txt'), 'w', encoding='utf-8') as args_txt:
-        args_txt.write(str(args))
+        args_txt.write(str(args)) # 写入所有定义的超参数到Log
 
-    writer = SummaryWriter(out_dir, purge_step=start_epoch)
+    writer = SummaryWriter(out_dir, purge_step=start_epoch) # 写入日志器其定义
     with open(os.path.join(out_dir, 'args.txt'), 'w', encoding='utf-8') as args_txt:
         args_txt.write(str(args))
         args_txt.write('\n')
         args_txt.write(' '.join(sys.argv))
 
-    encoder = encoding.PoissonEncoder()
+    encoder = encoding.PoissonEncoder() # 初始化一个泊松编码器
 
-    for epoch in range(start_epoch, args.epochs):
-        start_time = time.time()
-        net.train()
+    for epoch in range(start_epoch, args.epochs): # epochs主循环
+        start_time = time.time() # 起始时间
+        net.train() # 启动训练
         train_loss = 0
         train_acc = 0
         train_samples = 0
-        for img, label in train_data_loader:
-            optimizer.zero_grad()
+        for img, label in train_data_loader: # 提取img和label
+            optimizer.zero_grad() # 梯度归0
             img = img.to(args.device)
             label = label.to(args.device)
-            label_onehot = F.one_hot(label, 10).float()
+            label_onehot = F.one_hot(label, 10).float() # 独热向量定义一个10
 
             if scaler is not None:
-                with amp.autocast():
+                with amp.autocast(): # 使用amp的自动精度转换
                     out_fr = 0.
-                    for t in range(args.T):
-                        encoded_img = encoder(img)
-                        out_fr += net(encoded_img)
-                    out_fr = out_fr / args.T
-                    loss = F.mse_loss(out_fr, label_onehot)
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+                    for t in range(args.T): # 在仿真时间步长下循环
+                        encoded_img = encoder(img) # 使用泊松编码的方式把图像进行编码
+                        out_fr += net(encoded_img) # 输出脉冲的fires rate
+                    out_fr = out_fr / args.T # 计算平均的fires rate
+                    loss = F.mse_loss(out_fr, label_onehot) # 计算输出的fr和独热向量标签的误差
+                scaler.scale(loss).backward() #缩放loss并进行反向传播
+                scaler.step(optimizer) # 使用优化器进行梯度下降
+                scaler.update() # 更新梯度值
             else:
                 out_fr = 0.
                 for t in range(args.T):
@@ -179,21 +182,21 @@ def main():
                 loss.backward()
                 optimizer.step()
 
-            train_samples += label.numel()
-            train_loss += loss.item() * label.numel()
-            train_acc += (out_fr.argmax(1) == label).float().sum().item()
+            train_samples += label.numel() # 累加训练使用过的label数量
+            train_loss += loss.item() * label.numel() # 累加所有label计算得到的损失值
+            train_acc += (out_fr.argmax(1) == label).float().sum().item() # 累加训练准确度
 
             functional.reset_net(net)
 
         train_time = time.time()
-        train_speed = train_samples / (train_time - start_time)
-        train_loss /= train_samples
-        train_acc /= train_samples
+        train_speed = train_samples / (train_time - start_time) # 计算训练的速度
+        train_loss /= train_samples # 计算训练损失的平均值
+        train_acc /= train_samples  # 计算训练准确度的平均值
 
-        writer.add_scalar('train_loss', train_loss, epoch)
-        writer.add_scalar('train_acc', train_acc, epoch)
+        writer.add_scalar('train_loss', train_loss, epoch) # 添加损失结果到tensorboard
+        writer.add_scalar('train_acc', train_acc, epoch)   # 添加准确度结果到tensorboard
 
-        net.eval()
+        net.eval() # 正向推理网络测试集
         test_loss = 0
         test_acc = 0
         test_samples = 0
@@ -212,19 +215,20 @@ def main():
                 test_samples += label.numel()
                 test_loss += loss.item() * label.numel()
                 test_acc += (out_fr.argmax(1) == label).float().sum().item()
-                functional.reset_net(net)
+                functional.reset_net(net) #重置网络
         test_time = time.time()
-        test_speed = test_samples / (test_time - train_time)
-        test_loss /= test_samples
-        test_acc /= test_samples
-        writer.add_scalar('test_loss', test_loss, epoch)
-        writer.add_scalar('test_acc', test_acc, epoch)
+        test_speed = test_samples / (test_time - train_time) # 测试消耗的时间
+        test_loss /= test_samples # 测试的损失
+        test_acc /= test_samples # 测试的准确度
+        writer.add_scalar('test_loss', test_loss, epoch) # 添加测试损失到tensorboard
+        writer.add_scalar('test_acc', test_acc, epoch)  # 添加测试准确度到tensorboard
 
         save_max = False
-        if test_acc > max_test_acc:
+        if test_acc > max_test_acc: # 只有测试集准确度最高的才保存
             max_test_acc = test_acc
             save_max = True
 
+        # checkpoint定义了存储下来的字段数据，net，optimizer，epoch，max_test_acc
         checkpoint = {
             'net': net.state_dict(),
             'optimizer': optimizer.state_dict(),
@@ -233,25 +237,27 @@ def main():
         }
 
         if save_max:
-            torch.save(checkpoint, os.path.join(out_dir, 'checkpoint_max.pth'))
+            torch.save(checkpoint, os.path.join(out_dir, 'checkpoint_max.pth')) # 执行最大准确度模型的保存
 
-        torch.save(checkpoint, os.path.join(out_dir, 'checkpoint_latest.pth'))
+        torch.save(checkpoint, os.path.join(out_dir, 'checkpoint_latest.pth')) # 存储最新的模型
 
         print(args)
         print(out_dir)
+        # 打印一些重要的结果参数，epoch, train loss, train acc, test loss, test acc, max test acc, 训练速度，测试速度
         print(f'epoch ={epoch}, train_loss ={train_loss: .4f}, train_acc ={train_acc: .4f}, test_loss ={test_loss: .4f}, test_acc ={test_acc: .4f}, max_test_acc ={max_test_acc: .4f}')
         print(f'train speed ={train_speed: .4f} images/s, test speed ={test_speed: .4f} images/s')
+        # 下面这行代码主要是用来计算还有多少时间训练结束 当前时间 + 训练一个apoch的时间 * 还剩下的epoch数值 转换成标准时间，
         print(f'escape time = {(datetime.datetime.now() + datetime.timedelta(seconds=(time.time() - start_time) * (args.epochs - epoch))).strftime("%Y-%m-%d %H:%M:%S")}\n')
 
     # 保存绘图用数据
     net.eval()
-    # 注册钩子
+    # 注册钩子，当推理到最后一层的时候，执行save_hook函数
     output_layer = net.layer[-1] # 输出层
     output_layer.v_seq = []
     output_layer.s_seq = []
     def save_hook(m, x, y):
-        m.v_seq.append(m.v.unsqueeze(0))
-        m.s_seq.append(y.unsqueeze(0))
+        m.v_seq.append(m.v.unsqueeze(0)) # voltage
+        m.s_seq.append(y.unsqueeze(0)) # 预测的y是spikes
 
     output_layer.register_forward_hook(save_hook)
 
@@ -263,7 +269,7 @@ def main():
         for t in range(args.T):
             encoded_img = encoder(img)
             out_fr += net(encoded_img)
-        out_spikes_counter_frequency = (out_fr / args.T).cpu().numpy()
+        out_spikes_counter_frequency = (out_fr / args.T).cpu().numpy() # 计算仿真时间内，平均的fire rate
         print(f'Firing rate: {out_spikes_counter_frequency}')
 
         output_layer.v_seq = torch.cat(output_layer.v_seq)
